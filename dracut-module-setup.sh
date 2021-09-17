@@ -664,8 +664,6 @@ kdump_install_net() {
     local _static _proto _ip_conf _ip_opts _ifname_opts
     local _znet_netdev _znet_conpath
 
-    clone_nmconnections
-
     _destaddr=$(kdump_get_remote_ip "$1")
     _route=$(kdump_get_ip_route "$_destaddr")
     _srcaddr=$(kdump_get_ip_route_field "$_route" "src")
@@ -723,6 +721,11 @@ kdump_install_net() {
         # network-manager module needs this parameter
         echo "rd.neednet" >> "${initdir}/etc/cmdline.d/50neednet.conf"
     fi
+
+    # Stop dracut 35network-manger to calling nm-initrd-generator.
+    # Note this line of code can be removed after NetworkManager >= 1.35.2
+    # gets released.
+    echo > "${initdir}/usr/libexec/nm-initrd-generator"
 
     # Save netdev used for kdump as cmdline
     # Whoever calling kdump_install_net() is setting up the default gateway,
