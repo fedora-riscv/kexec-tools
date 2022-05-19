@@ -386,6 +386,36 @@ kdump_install_nm_netif_allowlist() {
     inst "$_netif_allowlist_nm_conf" "/etc/NetworkManager/conf.d/10-kdump-netif.conf"
 }
 
+_get_nic_driver() {
+    ethtool -i "$1" | sed -n -E "s/driver: (.*)/\1/p"
+}
+
+kdump_install_nic_driver() {
+    local _netif _driver _drivers
+
+    _drivers=()
+
+    for _netif in $1; do
+        _driver=$(_get_nic_driver "$_netif")
+        if [[ -z $_driver ]]; then
+            derror "Failed to get the driver of $_netif"
+            exit 1
+        fi
+
+        if [[ $_driver == "802.1Q VLAN Support" ]]; then
+            # ethtool somehow doesn't return the driver name for a VLAN NIC
+            _driver=8021q
+        elif [[ $_driver == "team" ]]; then
+            # install the team mode drivers like team_mode_roundrobin.ko as well
+            _driver='=drivers/net/team'
+        fi
+
+        _drivers+=("$_driver")
+    done
+
+    instmods "${_drivers[@]}"
+}
+
 kdump_setup_bridge() {
     local _netdev=$1
     local _dev
@@ -1056,6 +1086,7 @@ install() {
     if [[ -n "$_netifs" ]]; then
         kdump_install_nmconnections "$_netifs"
         kdump_install_nm_netif_allowlist "$_netifs"
+        kdump_install_nic_driver "$_netifs"
     fi
 
     # For the lvm type target under kdump, in /etc/lvm/lvm.conf we can
