@@ -107,7 +107,6 @@ Requires:       systemd-udev%{?_isa}
 #
 # Patches 501 through 600 are meant for ARM kexec-tools enablement
 #
-Patch501: ./kexec-tools-2.0.23-arm64-kexec-arm64-add-support-for-R_AARCH64_LDST128_.patch
 
 #
 # Patches 601 onward are generic patches
@@ -126,8 +125,6 @@ component of the kernel's kexec feature.
 mkdir -p -m755 kcp
 tar -z -x -v -f %{SOURCE9}
 tar -z -x -v -f %{SOURCE19}
-
-%patch501 -p1
 
 %ifarch ppc
 %define archdef ARCH=ppc
