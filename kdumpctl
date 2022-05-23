@@ -9,10 +9,7 @@ KDUMP_LOG_PATH="/var/log"
 MKDUMPRD="/sbin/mkdumprd -f"
 MKFADUMPRD="/sbin/mkfadumprd"
 DRACUT_MODULES_FILE="/usr/lib/dracut/modules.txt"
-SAVE_PATH=/var/crash
-SSH_KEY_LOCATION="/root/.ssh/kdump_id_rsa"
 INITRD_CHECKSUM_LOCATION="/boot/.fadump_initrd_checksum"
-DUMP_TARGET=""
 DEFAULT_INITRD=""
 DEFAULT_INITRD_BAK=""
 KDUMP_INITRD=""
@@ -27,14 +24,22 @@ standard_kexec_args="-d -p"
 # Some default values in case /etc/sysconfig/kdump doesn't include
 KDUMP_COMMANDLINE_REMOVE="hugepages hugepagesz slub_debug"
 
+declare -A OPT
+
 if [[ -f /etc/sysconfig/kdump ]]; then
 	. /etc/sysconfig/kdump
 fi
 
 [[ $dracutbasedir ]] || dracutbasedir=/usr/lib/dracut
 . $dracutbasedir/dracut-functions.sh
-. /lib/kdump/kdump-lib.sh
-. /lib/kdump/kdump-logger.sh
+
+if [[ ${__SOURCED__:+x} ]]; then
+	KDUMP_LIB_PATH=.
+else
+	KDUMP_LIB_PATH=/lib/kdump
+fi
+. $KDUMP_LIB_PATH/kdump-lib.sh
+. $KDUMP_LIB_PATH/kdump-logger.sh
 
 #initiate the kdump logger
 if ! dlog_init; then
@@ -86,7 +91,6 @@ rebuild_fadump_initrd()
 check_earlykdump_is_enabled()
 {
 	grep -q -w "rd.earlykdump" /proc/cmdline
-	return $?
 }
 
 rebuild_kdump_initrd()
@@ -117,8 +121,6 @@ rebuild_initrd()
 	else
 		rebuild_kdump_initrd
 	fi
-
-	return $?
 }
 
 #$1: the files to be checked with IFS=' '
@@ -188,9 +190,29 @@ restore_default_initrd()
 	fi
 }
 
-check_config()
+_set_config()
 {
-	local -A _opt_rec
+	local opt=$1
+	local val=$2
+
+	if [[ -z $val ]]; then
+		derror "Invalid kdump config value for option '$opt'"
+		return 1
+	fi
+
+	if [[ -n ${OPT[$opt]} ]]; then
+		if [[ $opt == _target ]] || [[ $opt == _fstype ]]; then
+			derror "More than one dump targets specified"
+		else
+			derror "Duplicated kdump config value of option $opt"
+		fi
+		return 1
+	fi
+	OPT[$opt]="$val"
+}
+
+parse_config()
+{
 	while read -r config_opt config_val; do
 		case "$config_opt" in
 		dracut_args)
@@ -199,19 +221,33 @@ check_config()
 					derror 'Multiple mount targets specified in one "dracut_args".'
 					return 1
 				fi
-				config_opt=_target
+				_set_config _fstype "$(get_dracut_args_fstype "$config_val")" || return 1
+				_set_config _target "$(get_dracut_args_target "$config_val")" || return 1
 			fi
 			;;
 		raw)
 			if [[ -d "/proc/device-tree/ibm,opal/dump" ]]; then
 				dwarn "WARNING: Won't capture opalcore when 'raw' dump target is used."
 			fi
+			_set_config _fstype "$config_opt" || return 1
 			config_opt=_target
 			;;
 		ext[234] | minix | btrfs | xfs | nfs | ssh)
+			_set_config _fstype "$config_opt" || return 1
 			config_opt=_target
 			;;
-		sshkey | path | core_collector | kdump_post | kdump_pre | extra_bins | extra_modules | failure_action | default | final_action | force_rebuild | force_no_rebuild | fence_kdump_args | fence_kdump_nodes | auto_reset_crashkernel) ;;
+		sshkey)
+			if [[ -z $config_val ]]; then
+				derror "Invalid kdump config value for option '$config_opt'"
+				return 1
+			elif [[ -f $config_val ]]; then
+				config_val=$(/usr/bin/readlink -m "$config_val")
+			else
+				dwarn "WARNING: '$config_val' doesn't exist, using default value '$DEFAULT_SSHKEY'"
+				config_val=$DEFAULT_SSHKEY
+			fi
+			;;
+		path | core_collector | kdump_post | kdump_pre | extra_bins | extra_modules | failure_action | default | final_action | force_rebuild | force_no_rebuild | fence_kdump_args | fence_kdump_nodes | auto_reset_crashkernel) ;;
 
 		net | options | link_delay | disk_timeout | debug_mem_level | blacklist)
 			derror "Deprecated kdump config option: $config_opt. Refer to kdump.conf manpage for alternatives."
@@ -226,25 +262,16 @@ check_config()
 			;;
 		esac
 
-		if [[ -z $config_val ]]; then
-			derror "Invalid kdump config value for option '$config_opt'"
-			return 1
-		fi
-
-		if [[ -n ${_opt_rec[$config_opt]} ]]; then
-			if [[ $config_opt == _target ]]; then
-				derror "More than one dump targets specified"
-			else
-				derror "Duplicated kdump config value of option $config_opt"
-			fi
-			return 1
-		fi
-		_opt_rec[$config_opt]="$config_val"
+		_set_config "$config_opt" "$config_val" || return 1
 	done <<< "$(kdump_read_conf)"
+
+	OPT[path]=${OPT[path]:-$DEFAULT_PATH}
+	OPT[sshkey]=${OPT[sshkey]:-$DEFAULT_SSHKEY}
 
 	check_failure_action_config || return 1
 	check_final_action_config || return 1
 	check_fence_kdump_config || return 1
+	check_ssh_config || return 1
 
 	return 0
 }
@@ -306,8 +333,8 @@ check_files_modified()
 	#also rebuild when Pacemaker cluster conf is changed and fence kdump is enabled.
 	modified_files=$(get_pcs_cluster_modified_files)
 
-	EXTRA_BINS=$(kdump_get_conf_val kdump_post)
-	CHECK_FILES=$(kdump_get_conf_val kdump_pre)
+	EXTRA_BINS=${OPT[kdump_post]}
+	CHECK_FILES=${OPT[kdump_pre]}
 	HOOKS="/etc/kdump/post.d/ /etc/kdump/pre.d/"
 	if [[ -d /etc/kdump/post.d ]]; then
 		for file in /etc/kdump/post.d/*; do
@@ -324,17 +351,17 @@ check_files_modified()
 		done
 	fi
 	HOOKS="$HOOKS $POST_FILES $PRE_FILES"
-	CORE_COLLECTOR=$(kdump_get_conf_val core_collector | awk '{print $1}')
+	CORE_COLLECTOR=$(echo "${OPT[core_collector]}" | awk '{print $1}')
 	CORE_COLLECTOR=$(type -P "$CORE_COLLECTOR")
 	# POST_FILES and PRE_FILES are already checked against executable, need not to check again.
 	EXTRA_BINS="$EXTRA_BINS $CHECK_FILES"
-	CHECK_FILES=$(kdump_get_conf_val extra_bins)
+	CHECK_FILES=${OPT[extra_bins]}
 	EXTRA_BINS="$EXTRA_BINS $CHECK_FILES"
 	files="$KDUMP_CONFIG_FILE $KDUMP_KERNEL $EXTRA_BINS $CORE_COLLECTOR"
 	[[ -e /etc/fstab ]] && files="$files /etc/fstab"
 
 	# Check for any updated extra module
-	EXTRA_MODULES="$(kdump_get_conf_val extra_modules)"
+	EXTRA_MODULES="${OPT[extra_modules]}"
 	if [[ -n $EXTRA_MODULES ]]; then
 		if [[ -e /lib/modules/$KDUMP_KERNELVER/modules.dep ]]; then
 			files="$files /lib/modules/$KDUMP_KERNELVER/modules.dep"
@@ -526,14 +553,14 @@ check_rebuild()
 
 	setup_initrd || return 1
 
-	force_no_rebuild=$(kdump_get_conf_val force_no_rebuild)
+	force_no_rebuild=${OPT[force_no_rebuild]}
 	force_no_rebuild=${force_no_rebuild:-0}
 	if [[ $force_no_rebuild != "0" ]] && [[ $force_no_rebuild != "1" ]]; then
 		derror "Error: force_no_rebuild value is invalid"
 		return 1
 	fi
 
-	force_rebuild=$(kdump_get_conf_val force_rebuild)
+	force_rebuild=${OPT[force_rebuild]}
 	force_rebuild=${force_rebuild:-0}
 	if [[ $force_rebuild != "0" ]] && [[ $force_rebuild != "1" ]]; then
 		derror "Error: force_rebuild value is invalid"
@@ -584,7 +611,6 @@ check_rebuild()
 
 	dinfo "Rebuilding $TARGET_INITRD"
 	rebuild_initrd
-	return $?
 }
 
 # On ppc64le LPARs, the keys trusted by firmware do not end up in
@@ -667,35 +693,17 @@ load_kdump()
 
 check_ssh_config()
 {
-	local SSH_TARGET
+	local target
 
-	while read -r config_opt config_val; do
-		case "$config_opt" in
-		sshkey)
-			# remove inline comments after the end of a directive.
-			if [[ -f $config_val ]]; then
-				# canonicalize the path
-				SSH_KEY_LOCATION=$(/usr/bin/readlink -m "$config_val")
-			else
-				dwarn "WARNING: '$config_val' doesn't exist, using default value '$SSH_KEY_LOCATION'"
-			fi
-			;;
-		path)
-			SAVE_PATH=$config_val
-			;;
-		ssh)
-			DUMP_TARGET=$config_val
-			;;
-		*) ;;
+	[[ "${OPT[_fstype]}" == ssh ]] || return 0
 
-		esac
-	done <<< "$(kdump_read_conf)"
-
-	#make sure they've configured kdump.conf for ssh dumps
-	SSH_TARGET=$(echo -n "$DUMP_TARGET" | sed -n '/.*@/p')
-	if [[ -z $SSH_TARGET ]]; then
+	target=$(ssh -G "${OPT[_target]}" | sed  -n -e "s/^hostname[[:space:]]\+\([^[:space:]]*\).*$/\1/p")
+	[[ ${OPT[_target]} =~ .*@.* ]] || return 1
+	if [[ ${OPT[_target]#*@} != "$target" ]]; then
+		derror "Invalid ssh destination ${OPT[_target]} provided."
 		return 1
 	fi
+
 	return 0
 }
 
@@ -711,23 +719,25 @@ check_and_wait_network_ready()
 	local retval
 	local errmsg
 
+	[[ "${OPT[_fstype]}" == ssh ]] || return 0
+
 	start_time=$(date +%s)
 	while true; do
-		errmsg=$(ssh -i "$SSH_KEY_LOCATION" -o BatchMode=yes "$DUMP_TARGET" mkdir -p "$SAVE_PATH" 2>&1)
+		errmsg=$(ssh -i "${OPT[sshkey]}" -o BatchMode=yes "${OPT[_target]}" mkdir -p "${OPT[path]}" 2>&1)
 		retval=$?
 
 		# ssh exits with the exit status of the remote command or with 255 if an error occurred
 		if [[ $retval -eq 0 ]]; then
 			return 0
 		elif [[ $retval -ne 255 ]]; then
-			derror "Could not create $DUMP_TARGET:$SAVE_PATH, you should check the privilege on server side"
+			derror "Could not create ${OPT[_target]}:${OPT[path]}, you should check the privilege on server side"
 			return 1
 		fi
 
 		# if server removes the authorized_keys or, no /root/.ssh/kdump_id_rsa
 		ddebug "$errmsg"
 		if echo "$errmsg" | grep -q "Permission denied\|No such file or directory\|Host key verification failed"; then
-			derror "Could not create $DUMP_TARGET:$SAVE_PATH, you probably need to run \"kdumpctl propagate\""
+			derror "Could not create ${OPT[_target]}:${OPT[path]}, you probably need to run \"kdumpctl propagate\""
 			return 1
 		fi
 
@@ -738,53 +748,47 @@ check_and_wait_network_ready()
 
 		cur=$(date +%s)
 		diff=$((cur - start_time))
-		# 60s time out
+		# time out after 180s
 		if [[ $diff -gt 180 ]]; then
 			break
 		fi
 		sleep 1
 	done
 
-	dinfo "Could not create $DUMP_TARGET:$SAVE_PATH, ipaddr is not ready yet. You should check network connection"
+	dinfo "Could not create ${OPT[_target]}:${OPT[path]}, ipaddr is not ready yet. You should check network connection"
 	return 1
-}
-
-check_ssh_target()
-{
-	check_and_wait_network_ready
 }
 
 propagate_ssh_key()
 {
-	if ! check_ssh_config; then
-		derror "No ssh config specified in $KDUMP_CONFIG_FILE.  Can't propagate"
+	local SSH_USER SSH_SERVER
+
+	parse_config || return 1
+
+	if [[ ${OPT[_fstype]} != ssh ]] ; then
+		derror "No ssh destination defined in $KDUMP_CONFIG_FILE."
+		derror "Please verify that $KDUMP_CONFIG_FILE contains 'ssh <user>@<host>' and that it is properly formatted."
 		exit 1
 	fi
 
-	local KEYFILE=$SSH_KEY_LOCATION
-	local errmsg="Failed to propagate ssh key"
+	local KEYFILE=${OPT[sshkey]}
 
 	#Check to see if we already created key, if not, create it.
 	if [[ -f $KEYFILE ]]; then
 		dinfo "Using existing keys..."
 	else
 		dinfo "Generating new ssh keys... "
-		/usr/bin/ssh-keygen -t rsa -f "$KEYFILE" -N "" 2>&1 > /dev/null
+		/usr/bin/ssh-keygen -t rsa -f "$KEYFILE" -N "" &> /dev/null
 		dinfo "done."
 	fi
 
-	#now find the target ssh user and server to contact.
-	SSH_USER=$(echo "$DUMP_TARGET" | cut -d@ -f1)
-	SSH_SERVER=$(echo "$DUMP_TARGET" | sed -e's/\(.*@\)\(.*$\)/\2/')
-
-	#now send the found key to the found server
-	ssh-copy-id -i "$KEYFILE" "$SSH_USER@$SSH_SERVER"
-	RET=$?
-	if [[ $RET == 0 ]]; then
+	SSH_USER=${OPT[_target]%@*}
+	SSH_SERVER=${OPT[_target]#*@}
+	if ssh-copy-id -i "$KEYFILE" "${OPT[_target]}"; then
 		dinfo "$KEYFILE has been added to ~$SSH_USER/.ssh/authorized_keys on $SSH_SERVER"
 		return 0
 	else
-		derror "$errmsg, $KEYFILE failed in transfer to $SSH_SERVER"
+		derror "Failed to propagate ssh key, could not transfer $KEYFILE to $SSH_SERVER"
 		exit 1
 	fi
 }
@@ -815,17 +819,15 @@ check_current_status()
 	else
 		check_current_kdump_status
 	fi
-
-	return $?
 }
 
 save_raw()
 {
-	local kdump_dir
 	local raw_target
 
-	raw_target=$(kdump_get_conf_val raw)
-	[[ -z $raw_target ]] && return 0
+	[[ ${OPT[_fstype]} == raw ]] || return 0
+
+	raw_target=${OPT[_target]}
 	[[ -b $raw_target ]] || {
 		derror "raw partition $raw_target not found"
 		return 1
@@ -835,13 +837,8 @@ save_raw()
 		dwarn "Warning: Detected '$check_fs' signature on $raw_target, data loss is expected."
 		return 0
 	fi
-	kdump_dir=$(kdump_get_conf_val path)
-	if [[ -z ${kdump_dir} ]]; then
-		coredir="/var/crash/$(date +"%Y-%m-%d-%H:%M")"
-	else
-		coredir="${kdump_dir}/$(date +"%Y-%m-%d-%H:%M")"
-	fi
 
+	coredir="${OPT[path]}/$(date +"%Y-%m-%d-%H:%M")"
 	mkdir -p "$coredir"
 	[[ -d $coredir ]] || {
 		derror "failed to create $coredir"
@@ -859,27 +856,22 @@ save_raw()
 	return 0
 }
 
-local_fs_dump_target()
+is_local_target()
 {
-	local _target
-
-	if _target=$(grep -E "^ext[234]|^xfs|^btrfs|^minix" /etc/kdump.conf); then
-		echo "$_target" | awk '{print $2}'
-	fi
+	[[ ${OPT[_fstype]} =~ ^ext[234]|^xfs|^btrfs|^minix ]]
 }
 
 path_to_be_relabeled()
 {
-	local _path _target _mnt="/" _rmnt
+	local _path _mnt="/" _rmnt
 
 	if is_user_configured_dump_target; then
 		if is_mount_in_dracut_args; then
 			return
 		fi
 
-		_target=$(local_fs_dump_target)
-		if [[ -n $_target ]]; then
-			_mnt=$(get_mntpoint_from_target "$_target")
+		if is_local_target; then
+			_mnt=$(get_mntpoint_from_target "${OPT[_target]}")
 			if ! is_mounted "$_mnt"; then
 				return
 			fi
@@ -921,7 +913,7 @@ check_fence_kdump_config()
 
 	hostname=$(hostname)
 	ipaddrs=$(hostname -I)
-	nodes=$(kdump_get_conf_val "fence_kdump_nodes")
+	nodes=${OPT[fence_kdump_nodes]}
 
 	for node in $nodes; do
 		if [[ $node == "$hostname" ]]; then
@@ -945,7 +937,6 @@ check_dump_feasibility()
 	fi
 
 	check_kdump_feasibility
-	return $?
 }
 
 start_fadump()
@@ -967,8 +958,6 @@ start_dump()
 	else
 		load_kdump
 	fi
-
-	return $?
 }
 
 check_failure_action_config()
@@ -977,8 +966,8 @@ check_failure_action_config()
 	local failure_action
 	local option="failure_action"
 
-	default_option=$(kdump_get_conf_val default)
-	failure_action=$(kdump_get_conf_val failure_action)
+	default_option=${OPT[default]}
+	failure_action=${OPT[failure_action]}
 
 	if [[ -z $failure_action ]] && [[ -z $default_option ]]; then
 		return 0
@@ -1007,7 +996,7 @@ check_final_action_config()
 {
 	local final_action
 
-	final_action=$(kdump_get_conf_val final_action)
+	final_action=${OPT[final_action]}
 	if [[ -z $final_action ]]; then
 		return 0
 	else
@@ -1030,7 +1019,7 @@ start()
 		return 1
 	fi
 
-	if ! check_config; then
+	if ! parse_config; then
 		derror "Starting kdump: [FAILED]"
 		return 1
 	fi
@@ -1049,11 +1038,9 @@ start()
 		return 0
 	fi
 
-	if check_ssh_config; then
-		if ! check_ssh_target; then
-			derror "Starting kdump: [FAILED]"
-			return 1
-		fi
+	if ! check_and_wait_network_ready; then
+		derror "Starting kdump: [FAILED]"
+		return 1
 	fi
 
 	if ! check_rebuild; then
@@ -1077,7 +1064,7 @@ reload()
 
 	if [[ $DEFAULT_DUMP_MODE == "fadump" ]]; then
 		reload_fadump
-		return $?
+		return
 	else
 		if ! stop_kdump; then
 			derror "Stopping kdump: [FAILED]"
@@ -1141,7 +1128,7 @@ reload_fadump()
 		# to handle such scenario.
 		if stop_fadump; then
 			start_fadump
-			return $?
+			return
 		fi
 	fi
 
@@ -1168,19 +1155,13 @@ stop()
 
 rebuild()
 {
-	check_config || return 1
-
-	if check_ssh_config; then
-		if ! check_ssh_target; then
-			return 1
-		fi
-	fi
+	parse_config || return 1
+	check_and_wait_network_ready || return 1
 
 	setup_initrd || return 1
 
 	dinfo "Rebuilding $TARGET_INITRD"
 	rebuild_initrd
-	return $?
 }
 
 do_estimate()
@@ -1270,7 +1251,7 @@ do_estimate()
 		done
 	fi
 
-	if [[ $reserved_size -le $recommended_size ]]; then
+	if [[ $reserved_size -lt $recommended_size ]]; then
 		echo "WARNING: Current crashkernel size is lower than recommended size $((recommended_size / size_mb))M."
 	fi
 }
@@ -1701,11 +1682,6 @@ reset_crashkernel_for_installed_kernel()
 	fi
 }
 
-if [[ ! -f $KDUMP_CONFIG_FILE ]]; then
-	derror "Error: No kdump config file found!"
-	exit 1
-fi
-
 main()
 {
 	# Determine if the dump mode is kdump or fadump
@@ -1778,6 +1754,15 @@ main()
 	esac
 }
 
+if [[ ${__SOURCED__:+x} ]]; then
+	return
+fi
+
+if [[ ! -f $KDUMP_CONFIG_FILE ]]; then
+	derror "Error: No kdump config file found!"
+	exit 1
+fi
+
 # Other kdumpctl instances will block in queue, until this one exits
 single_instance_lock
 
@@ -1787,5 +1772,3 @@ single_instance_lock
 	exec 9<&-
 	main "$@"
 )
-
-exit $?

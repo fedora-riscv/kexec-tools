@@ -1,11 +1,11 @@
 %global eppic_ver e8844d3793471163ae4a56d8f95897be9e5bd554
 %global eppic_shortver %(c=%{eppic_ver}; echo ${c:0:7})
-%global mkdf_ver 1.7.0
+%global mkdf_ver 1.7.1
 %global mkdf_shortver %(c=%{mkdf_ver}; echo ${c:0:7})
 
 Name: kexec-tools
-Version: 2.0.23
-Release: 5%{?dist}
+Version: 2.0.24
+Release: 3%{?dist}
 License: GPLv2
 Summary: The kexec/kdump userspace component
 
@@ -126,6 +126,7 @@ mkdir -p -m755 kcp
 tar -z -x -v -f %{SOURCE9}
 tar -z -x -v -f %{SOURCE19}
 
+
 %ifarch ppc
 %define archdef ARCH=ppc
 %endif
@@ -219,8 +220,8 @@ install -m 755 -D %{SOURCE33} $RPM_BUILD_ROOT%{_prefix}/lib/kernel/install.d/92-
 
 %ifarch %{ix86} x86_64 ppc64 s390x ppc64le aarch64
 install -m 755 makedumpfile-%{mkdf_ver}/makedumpfile $RPM_BUILD_ROOT/usr/sbin/makedumpfile
-install -m 644 makedumpfile-%{mkdf_ver}/makedumpfile.8.gz $RPM_BUILD_ROOT/%{_mandir}/man8/makedumpfile.8.gz
-install -m 644 makedumpfile-%{mkdf_ver}/makedumpfile.conf.5.gz $RPM_BUILD_ROOT/%{_mandir}/man5/makedumpfile.conf.5.gz
+install -m 644 makedumpfile-%{mkdf_ver}/makedumpfile.8 $RPM_BUILD_ROOT/%{_mandir}/man8/makedumpfile.8
+install -m 644 makedumpfile-%{mkdf_ver}/makedumpfile.conf.5 $RPM_BUILD_ROOT/%{_mandir}/man5/makedumpfile.conf.5
 install -m 644 makedumpfile-%{mkdf_ver}/makedumpfile.conf $RPM_BUILD_ROOT/%{_sysconfdir}/makedumpfile.conf.sample
 install -m 755 makedumpfile-%{mkdf_ver}/eppic_makedumpfile.so $RPM_BUILD_ROOT/%{_libdir}/eppic_makedumpfile.so
 mkdir -p $RPM_BUILD_ROOT/usr/share/makedumpfile/eppic_scripts/
@@ -404,6 +405,50 @@ fi
 %endif
 
 %changelog
+* Mon May 23 2022 Coiby <coxu@redhat.com> - 2.0.24-3
+- Update makedumpfile to 1.7.1
+- unit tests: add tests for get_system_size and get_recommend_size
+- improve get_recommend_size
+- fix a calculation error in get_system_size
+- logger: save log after all kdump progress finished
+
+* Sun Apr 24 2022 Coiby <coxu@redhat.com> - 2.0.24-2
+- remove the upper bound of default crashkernel value example
+- update fadump-howto
+- update kexec-kdump-howto
+- update crashkernel-howto
+- add man documentation for kdumpctl get-default-crashkernel
+- unit tests: add check_config with with the default kdump.conf
+- unit tests: add tests for kdump_get_conf_val in kdump-lib-initramfs.sh
+- unit tests: add tests for "kdumpctl reset-crashkernel"
+- unit tests: add tests for _{update,read}_kernel_arg_in_grub_etc_default in kdumpctl
+- unit tests: add tests for kdumpctl read_proc_environ_var and _is_osbuild
+- unit tests: add tests for get_dump_mode_by_fadump_val
+- unit tests: add tests for get_grub_kernel_boot_parameter
+- unit tests: prepare for kdumpctl and kdump-lib.sh to be unit-tested
+
+* Mon Apr 11 2022 Coiby <coxu@redhat.com> - 2.0.24-1
+- Update kexec-tools to 2.0.24
+- kdumpctl: remove kdump_get_conf_val in save_raw
+- kdumpctl: drop DUMP_TARGET variable
+- kdumpctl: drop SSH_KEY_LOCATION variable
+- kdumpctl: drop SAVE_PATH variable
+- kdumpctl: reduce file operations on kdump.conf
+- kdumpctl: merge check_ssh_config into check_config
+- kdumpctl: simplify propagate_ssh_key
+- kdumpctl: forbid aliases from ssh config
+- kdumpctl: fix comment in check_and_wait_network_ready
+- kdump-lib-initramfs: merge definitions for default ssh key
+- kdumpctl: remove unnecessary uses of $?
+- kdump-lib: fix typo in variable name
+- kdump-capture.service: switch to journal for stdout
+- kdumpctl/estimate: Fix unnecessary warning
+- kdumpctl: sync the $TARGET_INITRD after rebuild
+- try to update the crashkernel in GRUB_ETC_DEFAULT after kexec-tools updates the default crashkernel value
+- address the case where there are multiple values for the same kernel arg
+- update kernel crashkernel in posttrans RPM scriptlet when updating kexec-tools
+- kdump-lib.sh: Check the output of blkid with sed instead of eval
+
 * Mon Feb 14 2022 Coiby <coxu@redhat.com> - 2.0.23-5
 - fix incorrect usage of _get_all_kernels_from_grubby
 - fix the mistake of swapping function parameters of read_proc_environ_var
@@ -449,7 +494,7 @@ fi
 - sysconfig: make kexec_file_load as default option on aarch64
 - Enable zstd compression for makedumpfile in kexec-tools.spec
 
-* Mon Nov 18 2021 Coiby <coxu@redhat.com> - 2.0.23-1
+* Thu Nov 18 2021 Coiby <coxu@redhat.com> - 2.0.23-1
 - Update kexec-tools to 2.0.23
 - Rebase makedumpfile to 1.7.0
 - fix broken extra_bins when installing multiple binaries
