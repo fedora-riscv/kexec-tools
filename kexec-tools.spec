@@ -112,8 +112,6 @@ Patch501: ./kexec-tools-2.0.23-arm64-kexec-arm64-add-support-for-R_AARCH64_LDST1
 #
 # Patches 601 onward are generic patches
 #
-Patch601: ./kexec-tools-2.0.23-purgatory-do-not-enable-vectorization-automatically-.patch
-
 
 %description
 kexec-tools provides /sbin/kexec binary that facilitates a new
@@ -130,7 +128,6 @@ tar -z -x -v -f %{SOURCE9}
 tar -z -x -v -f %{SOURCE19}
 
 %patch501 -p1
-%patch601 -p1
 
 %ifarch ppc
 %define archdef ARCH=ppc
