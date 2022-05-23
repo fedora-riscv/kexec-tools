@@ -5,7 +5,7 @@
 
 Name: kexec-tools
 Version: 2.0.23
-Release: 6%{?dist}
+Release: 5%{?dist}
 License: GPLv2
 Summary: The kexec/kdump userspace component
 
@@ -404,10 +404,6 @@ fi
 %endif
 
 %changelog
-* Sat Apr  2 2022
-- arm64/kexec-arm64: add support for R_AARCH64_LDST128_ABS_LO12_NC rela
-- purgatory: do not enable vectorization automatically for purgatory compiling
-
 * Mon Feb 14 2022 Coiby <coxu@redhat.com> - 2.0.23-5
 - fix incorrect usage of _get_all_kernels_from_grubby
 - fix the mistake of swapping function parameters of read_proc_environ_var
