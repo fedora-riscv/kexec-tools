@@ -375,6 +375,19 @@ use_ipv4_or_ipv6() {
     fi
 }
 
+# nm-wait-online-initrd.service installed by dracut's 35-networkmanager
+# module call nm-online with "-s" thus it doesn't wait for network connectivity
+# to be established. Remove "-s" to avoid this undesirable effect.
+wait_for_network_connectivity() {
+    local _nm_wait_online_service_file
+
+    _nm_wait_online_service_file="$initdir/usr/lib/systemd/system/nm-wait-online-initrd.service"
+    [[ ! -f $_nm_wait_online_service_file ]] && return
+
+    sed -i -E "/^ExecStart=\/usr\/bin\/nm-online/ {
+         s/ -s / /;}" "$_nm_wait_online_service_file"
+}
+
 _clone_nmconnection() {
     local _clone_output _name _unique_id
 
@@ -1196,6 +1209,8 @@ install() {
     if is_nfs_dump_target || is_ssh_dump_target; then
         inst "ip"
     fi
+
+    wait_for_network_connectivity
 
     # For the lvm type target under kdump, in /etc/lvm/lvm.conf we can
     # safely replace "reserved_memory=XXXX"(default value is 8192) with
