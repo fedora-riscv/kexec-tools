@@ -4,8 +4,8 @@
 %global mkdf_shortver %(c=%{mkdf_ver}; echo ${c:0:7})
 
 Name: kexec-tools
-Version: 2.0.24
-Release: 4%{?dist}
+Version: 2.0.25
+Release: 1%{?dist}
 License: GPLv2
 Summary: The kexec/kdump userspace component
 
@@ -262,13 +262,19 @@ mkdir -p $RPM_BUILD_ROOT/%{dracutlibdir}/modules.d/
 mv $RPM_BUILD_ROOT/etc/kdump-adv-conf/kdump_dracut_modules/* $RPM_BUILD_ROOT/%{dracutlibdir}/modules.d/
 
 %pre
-# save the old default crashkernel values to /tmp/ when upgrading the package
-if ! grep -qs "ostree" /proc/cmdline && [ $1 == 2 ] && grep -q get-default-crashkernel /usr/bin/kdumpctl; then
+# Save the old default crashkernel values to /tmp/ when upgrading the package
+# so kdumpctl later can tell if it should update the kernel crashkernel
+# parameter in the posttrans scriptlet.  Note this feauture of auto-updating
+# the kernel crashkernel parameter currently doesn't support ostree, so skip it
+# for ostree.
+if [ ! -f /run/ostree-booted ] && [ $1 == 2 ] && grep -q get-default-crashkernel /usr/bin/kdumpctl; then
   kdumpctl get-default-crashkernel kdump > /tmp/old_default_crashkernel 2>/dev/null
 %ifarch ppc64 ppc64le
   kdumpctl get-default-crashkernel fadump > /tmp/old_default_crashkernel_fadump 2>/dev/null
 %endif
 fi
+# don't block package update
+:
 
 %post
 # Initial installation
@@ -336,9 +342,14 @@ do
 done
 
 %posttrans
-# try to reset kernel crashkernel value to new default value when upgrading
-# the package
-if ! grep -qs "ostree" /proc/cmdline && [ $1 == 1 ]; then
+# Try to reset kernel crashkernel value to new default value based on the old
+# default value or set up crasherkernel value for osbuild
+#
+# Note
+#  1. Skip ostree systems as they are not supported.
+#  2. "[ $1 == 1 ]" in posttrans scriptlet means both install and upgrade. The
+#     former case is used to set up crashkernel for osbuild
+if [ ! -f /run/ostree-booted ] && [ $1 == 1 ]; then
   kdumpctl reset-crashkernel-after-update
   rm /tmp/old_default_crashkernel 2>/dev/null
 %ifarch ppc64 ppc64le
@@ -405,6 +416,15 @@ fi
 %endif
 
 %changelog
+* Wed Aug 03 2022 Coiby <coxu@redhat.com> - 2.0.25-1
+- Update kexec-tools to 2.0.25
+- remind the users to run zipl after calling grubby on s390x
+- remove useless --zipl when calling grubby to update kernel command line
+- skip updating /etc/default/grub for s390x
+- use /run/ostree-booted to tell if scriptlet is running on OSTree system
+- Allow to update kexec-tools using virt-customize for cloud base image
+- KDUMP_COMMANDLINE: remove irqpoll parameter on aws aarch64 platform
+
 * Thu Jul 21 2022 Coiby <coxu@redhat.com> - 2.0.24-4
 - Checking the existence of 40-redhat.rules before modifying
 - kdump-lib: Add the CoreOS kernel dir to the boot_dirlist
