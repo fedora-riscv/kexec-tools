@@ -5,7 +5,7 @@
 
 Name: kexec-tools
 Version: 2.0.26
-Release: 3%{?dist}
+Release: 3.rv64%{?dist}
 License: GPLv2
 Summary: The kexec/kdump userspace component
 
@@ -107,6 +107,9 @@ Requires:       systemd-udev%{?_isa}
 #
 Patch601: kexec-tools-2.0.26-makedumpfile-Fix-wrong-exclusion-of-slab-pages-on-Linux-6.2.patch
 
+# riscv64 support patch: https://lore.kernel.org/all/20221020031548.47587-1-xianting.tian@linux.alibaba.com/
+Patch1000: kexec-tools-rv64-support.patch
+
 %description
 kexec-tools provides /sbin/kexec binary that facilitates a new
 kernel to boot using the kernel's kexec feature either on a
@@ -122,6 +125,10 @@ tar -z -x -v -f %{SOURCE9}
 tar -z -x -v -f %{SOURCE19}
 
 %patch601 -p1
+
+%ifarch riscv64
+%patch1000 -p1
+%endif
 
 %ifarch ppc
 %define archdef ARCH=ppc
@@ -414,6 +421,9 @@ fi
 %endif
 
 %changelog
+* Jan 30 2023 Liu Yang <Yang.Liu.sn@gmail.com> - 2.0.26-3.rv64
+- Add riscv64 support patch.
+
 * Jan 30 2023 Coiby <coxu@redhat.com> - 2.0.26-3
 - kdumpctl: make do_estimate more robust
 - kdumpctl: refractor check_rebuild
