@@ -5,7 +5,7 @@
 
 Name: kexec-tools
 Version: 2.0.26
-Release: 3.rv64%{?dist}
+Release: 3.rv64.2%{?dist}
 License: GPLv2
 Summary: The kexec/kdump userspace component
 
@@ -421,6 +421,9 @@ fi
 %endif
 
 %changelog
+* Oct 08 2023 Songsong Zhang <U2FsdGVkX1@gmail.com> - 2.0.26-3.rv64.2
+- Add kdump arch.
+
 * Jan 30 2023 Liu Yang <Yang.Liu.sn@gmail.com> - 2.0.26-3.rv64
 - Add riscv64 support patch.
 
