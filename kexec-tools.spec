@@ -5,7 +5,7 @@
 
 Name: kexec-tools
 Version: 2.0.27
-Release: 2%{?dist}
+Release: 2.rv64%{?dist}
 License: GPL-2.0-only
 Summary: The kexec/kdump userspace component
 
@@ -110,6 +110,9 @@ Requires:       systemd-udev%{?_isa}
 #
 Patch601: kexec-tools-2.0.26-makedumpfile-Fix-wrong-exclusion-of-slab-pages-on-Linux-6.2.patch
 
+# riscv64 support patch: https://lore.kernel.org/all/20221020031548.47587-1-xianting.tian@linux.alibaba.com/
+Patch1000: kexec-tools-rv64-support.patch
+
 %description
 kexec-tools provides /sbin/kexec binary that facilitates a new
 kernel to boot using the kernel's kexec feature either on a
@@ -125,6 +128,10 @@ tar -z -x -v -f %{SOURCE9}
 tar -z -x -v -f %{SOURCE19}
 
 %patch601 -p1
+
+%ifarch riscv64
+%patch1000 -p1
+%endif
 
 %ifarch ppc
 %define archdef ARCH=ppc
@@ -399,6 +406,9 @@ fi
 * Wed Oct 18 2023 Coiby Xu <coxu@redhat.com> - 2.0.27-2
 - Only try to reset crashkernel when kdump.service is enabled
 
+* Oct 08 2023 Songsong Zhang <U2FsdGVkX1@gmail.com> - 2.0.26-3.rv64.2
+- Add kdump arch.
+
 * Fri Sep 08 2023 Coiby Xu <coxu@redhat.com> - 2.0.27-1
 - kexec-tools 2.0.27 (Simon Horman)
 
@@ -440,6 +450,10 @@ fi
 - Install nfsv4-related drivers when users specify nfs dumping via dracut_args
 - sysconfig: add zfcp.allow_lun_scan to KDUMP_COMMANDLINE_REMOVE on s390
 - Use the correct command to get architecture
+
+
+* Jan 30 2023 Liu Yang <Yang.Liu.sn@gmail.com> - 2.0.26-3.rv64
+- Add riscv64 support patch.
 
 * Mon Jan 30 2023 Coiby <coxu@redhat.com> - 2.0.26-3
 - kdumpctl: make do_estimate more robust

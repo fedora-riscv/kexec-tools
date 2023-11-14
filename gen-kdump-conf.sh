@@ -211,6 +211,8 @@ update_param()
 case "$1" in
 aarch64) ;;
 
+riscv64) ;;
+
 i386) ;;
 
 ppc64) ;;

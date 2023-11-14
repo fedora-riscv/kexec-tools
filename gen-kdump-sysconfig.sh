@@ -76,6 +76,11 @@ aarch64)
 	update_param KDUMP_COMMANDLINE_APPEND \
 		"irqpoll nr_cpus=1 reset_devices cgroup_disable=memory udev.children-max=2 panic=10 swiotlb=noforce novmcoredd cma=0 hugetlb_cma=0"
 	;;
+riscv64)
+	update_param KEXEC_ARGS "-s"
+	update_param KDUMP_COMMANDLINE_APPEND \
+		"irqpoll nr_cpus=1 reset_devices cgroup_disable=memory udev.children-max=2 panic=10 swiotlb=noforce novmcoredd cma=0 hugetlb_cma=0"
+	;;
 i386)
 	update_param KDUMP_COMMANDLINE_APPEND \
 		"irqpoll nr_cpus=1 reset_devices numa=off udev.children-max=2 panic=10 transparent_hugepage=never novmcoredd cma=0 hugetlb_cma=0"
